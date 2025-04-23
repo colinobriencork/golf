@@ -1,10 +1,9 @@
-# chronogolf_login_organized.py
 import os
 import logging
 import time
 import datetime
 from pathlib import Path
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, Callable, Any
 from dataclasses import dataclass
 from dotenv import load_dotenv
 from selenium import webdriver
@@ -12,7 +11,9 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.remote.webelement import WebElement
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException, TimeoutException
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from enum import Enum, auto
 
 class BookingMode(Enum):
@@ -89,7 +90,8 @@ class Selectors:
         (By.XPATH, "//button[contains(@class, 'fl-button-primary') and text()='Continue']")
     ]
     AGREE_CHECKBOX = [
-        (By.CSS_SELECTOR, "input.fl-checkbox-input[ng-model='vm.acceptTermsAndConditions']"),
+        (By.CSS_SELECTOR, "input[ng-model='vm.acceptTermsAndConditions'][type='checkbox']"),
+        # Keep your existing fallback selectors if desired
         (By.CSS_SELECTOR, "input.fl-checkbox-input[ng-required='true']"),
         (By.CSS_SELECTOR, "input[type='checkbox'][required]")
     ]
@@ -107,6 +109,7 @@ class BookingConfig:
     PRE_ATTEMPT_SECONDS = 10  # Start trying 10 seconds before
     MAX_RETRIES = 60  # Retry for up to 1 minute
     RETRY_DELAY = 1  # Wait 1 second between retries
+    DEFAULT_WAIT_TIMEOUT = 10  # Default timeout for waits in seconds
     
     @property
     def target_date(self) -> datetime.date:
@@ -147,6 +150,80 @@ class ChronogolfLogin:
         self.selectors = Selectors()
         self.config = BookingConfig()
 
+    def wait_for_element(self, selectors: List[Tuple[str, str]], timeout=None, condition="presence") -> WebElement:
+        """Wait for an element to meet the specified condition."""
+        if timeout is None:
+            timeout = self.config.DEFAULT_WAIT_TIMEOUT
+            
+        end_time = time.time() + timeout
+        last_exception = None
+        
+        while time.time() < end_time:
+            for selector_type, selector in selectors:
+                try:
+                    if condition == "presence":
+                        return WebDriverWait(self.driver, 1).until(
+                            EC.presence_of_element_located((selector_type, selector))
+                        )
+                    elif condition == "clickable":
+                        return WebDriverWait(self.driver, 1).until(
+                            EC.element_to_be_clickable((selector_type, selector))
+                        )
+                    elif condition == "visible":
+                        return WebDriverWait(self.driver, 1).until(
+                            EC.visibility_of_element_located((selector_type, selector))
+                        )
+                except (NoSuchElementException, TimeoutException) as e:
+                    last_exception = e
+                    continue
+                
+        if last_exception:
+            raise BookingError(f"Element not found with any selector after {timeout} seconds: {last_exception}")
+        raise BookingError(f"Element not found with any selector after {timeout} seconds")
+
+    def wait_for_page_load(self, timeout=None):
+        """Wait for page to fully load."""
+        if timeout is None:
+            timeout = self.config.DEFAULT_WAIT_TIMEOUT
+            
+        try:
+            WebDriverWait(self.driver, timeout).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            return True
+        except Exception as e:
+            logging.error(f"Page did not load completely: {str(e)}")
+            return False
+            
+    def wait_for_ajax(self, timeout=None):
+        """Wait for jQuery AJAX requests to complete."""
+        if timeout is None:
+            timeout = self.config.DEFAULT_WAIT_TIMEOUT
+            
+        try:
+            WebDriverWait(self.driver, timeout).until(
+                lambda d: d.execute_script("return jQuery.active == 0")
+            )
+            return True
+        except Exception as e:
+            logging.error(f"AJAX requests did not complete: {str(e)}")
+            return False
+    
+    def retry_on_stale_element(self, action: Callable[[], Any], max_attempts=3) -> Any:
+        """Retry an action if a stale element reference exception occurs."""
+        attempts = 0
+        while attempts < max_attempts:
+            try:
+                return action()
+            except StaleElementReferenceException:
+                attempts += 1
+                logging.warning(f"Stale element encountered, retrying ({attempts}/{max_attempts})")
+                if attempts == max_attempts:
+                    raise
+            except Exception as e:
+                logging.error(f"Error during action: {str(e)}")
+                raise
+    
     def _validate_env_vars(self):
         """Validate required environment variables exist."""
         self.username = os.getenv("GOLF_USERNAME")
@@ -187,31 +264,47 @@ class ChronogolfLogin:
 
     def _click_login_tab(self) -> None:
         """Click the member login tab to show login form."""
-        member_tab = self._find_element(self.selectors.MEMBERS_TAB)
-        if not member_tab:
-            raise BookingError("Member login tab not found")
-        
-        member_tab.click()
-        logging.info("Clicked member login tab")
-        self.save_screenshot("02_login_tab_clicked.png")
+        try:
+            member_tab = self.wait_for_element(
+                self.selectors.MEMBERS_TAB, 
+                condition="clickable"
+            )
+            member_tab.click()
+            logging.info("Clicked member login tab")
+            self.save_screenshot("02_login_tab_clicked.png")
+        except BookingError as e:
+            logging.error(f"Failed to click login tab: {str(e)}")
+            raise
 
     def _handle_login_form(self) -> None:
         """Fill and submit login form."""
-        email_field = self._find_element(self.selectors.EMAIL_FIELD)
-        password_field = self._find_element(self.selectors.PASSWORD_FIELD)
-        
-        if not all([email_field, password_field]):
-            raise BookingError("Login form fields not found")
-
-        email_field.send_keys(self.username)
-        password_field.send_keys(self.password)
-        
-        login_button = self._find_element(self.selectors.LOGIN_BUTTON)
-        if not login_button:
-            raise BookingError("Login button not found")
-
-        login_button.click()
-        self.save_screenshot("03_login_submitted.png")
+        try:
+            # Wait for form elements to be interactable
+            email_field = self.wait_for_element(
+                self.selectors.EMAIL_FIELD, 
+                condition="visible"
+            )
+            password_field = self.wait_for_element(
+                self.selectors.PASSWORD_FIELD, 
+                condition="visible"
+            )
+            
+            email_field.clear()
+            email_field.send_keys(self.username)
+            
+            password_field.clear()
+            password_field.send_keys(self.password)
+            
+            login_button = self.wait_for_element(
+                self.selectors.LOGIN_BUTTON, 
+                condition="clickable"
+            )
+            login_button.click()
+            self.save_screenshot("03_login_submitted.png")
+            
+        except BookingError as e:
+            logging.error(f"Login form handling failed: {str(e)}")
+            raise
 
     def login(self) -> bool:
         """Public method to handle complete login process."""
@@ -239,16 +332,19 @@ class ChronogolfLogin:
 
     def _verify_login_success(self) -> bool:
         """Verify if login was successful."""
-        success = self._find_element(self.selectors.LOGIN_SUCCESS) is not None
-        
-        if success:
+        try:
+            success_element = self.wait_for_element(
+                self.selectors.LOGIN_SUCCESS, 
+                timeout=15,  # Give extra time for login to process
+                condition="visible"
+            )
             logging.info("Login successful!")
             self.save_screenshot("04_login_successful.png")
             return True
-        
-        logging.error("Login verification failed")
-        self.save_screenshot("04_login_failed.png")
-        return False
+        except Exception:
+            logging.error("Login verification failed")
+            self.save_screenshot("04_login_failed.png")
+            return False
 
     def _parse_month_title(self, title_text: str) -> datetime.datetime:
         """Parse the month title (e.g., 'April 2025') into a datetime object."""
@@ -260,21 +356,38 @@ class ChronogolfLogin:
 
     def _navigate_to_target_month(self, target_date: datetime.datetime) -> None:
         """Internal method to navigate to target month."""
-        month_title = self._find_element(self.selectors.MONTH_TITLE)
-        if not month_title:
-            raise BookingError("Could not find month title")
-
-        current_month = self._parse_month_title(month_title.text)
-        
-        # Only navigate forward until we reach target month
-        while current_month.year != target_date.year or current_month.month != target_date.month:
-            next_button = self._find_element([self.selectors.MONTH_NAVIGATION[1]])
-            if not next_button or 'disabled' in next_button.get_attribute('class'):
-                raise BookingError("Cannot navigate to future month")
-            
-            next_button.click()
-            month_title = self._find_element(self.selectors.MONTH_TITLE)
+        try:
+            month_title = self.wait_for_element(
+                self.selectors.MONTH_TITLE,
+                condition="visible"
+            )
             current_month = self._parse_month_title(month_title.text)
+            
+            # Only navigate forward until we reach target month
+            while current_month.year != target_date.year or current_month.month != target_date.month:
+                next_button = self.wait_for_element(
+                    [self.selectors.MONTH_NAVIGATION[1]],
+                    condition="clickable"
+                )
+                
+                if 'disabled' in next_button.get_attribute('class'):
+                    raise BookingError("Cannot navigate to future month")
+                
+                next_button.click()
+                
+                # Wait for calendar to update
+                self.wait_for_ajax()
+                
+                # Get updated month title
+                month_title = self.wait_for_element(
+                    self.selectors.MONTH_TITLE,
+                    condition="visible"
+                )
+                current_month = self._parse_month_title(month_title.text)
+                
+        except BookingError as e:
+            logging.error(f"Failed to navigate to target month: {str(e)}")
+            raise
 
     def _select_date(self, target_date_str: str) -> bool:
         """Internal method to select a date."""
@@ -282,16 +395,29 @@ class ChronogolfLogin:
             target_date = datetime.datetime.strptime(target_date_str, '%Y-%m-%d')
             self._navigate_to_target_month(target_date)
             
+            # Format the xpath with the target day
             date_xpath = f"//button[contains(@class, 'btn-sm')]//span[text()='{target_date.day}']/.."
-            date_button = self.driver.find_element(By.XPATH, date_xpath)
+            
+            # Wait for the specific date button to be clickable
+            date_button = WebDriverWait(self.driver, self.config.DEFAULT_WAIT_TIMEOUT).until(
+                EC.element_to_be_clickable((By.XPATH, date_xpath))
+            )
             
             if 'disabled' in date_button.get_attribute('class'):
                 logging.error(f"Date {target_date_str} is not available for booking")
                 return False
             
-            date_button.click()
+            def click_date():
+                date_button.click()
+                
+            self.retry_on_stale_element(click_date)
+            
             logging.info(f"Selected date: {target_date_str}")
             self.save_screenshot("05_selected_date.png")
+            
+            # Wait for date selection to process
+            self.wait_for_ajax()
+            
             return True
             
         except BookingError as e:
@@ -306,15 +432,27 @@ class ChronogolfLogin:
         try:
             # Try finding the specific player button using the number
             player_xpath = f"//a[contains(@class, 'toggler-heading') and contains(text(), '{num_players}')]"
-            player_button = self.driver.find_element(By.XPATH, player_xpath)
+            
+            # Wait for player selection to be available
+            player_button = WebDriverWait(self.driver, self.config.DEFAULT_WAIT_TIMEOUT).until(
+                EC.element_to_be_clickable((By.XPATH, player_xpath))
+            )
             
             if 'disabled' in player_button.get_attribute('class'):
                 logging.error(f"Cannot select {num_players} players - option is disabled")
                 return False
                 
-            player_button.click()
+            def click_player():
+                player_button.click()
+                
+            self.retry_on_stale_element(click_player)
+            
             logging.info(f"Selected {num_players} players")
             self.save_screenshot("06_players_selected.png")
+            
+            # Wait for player selection to process
+            self.wait_for_ajax()
+            
             return True
             
         except NoSuchElementException:
@@ -351,13 +489,19 @@ class ChronogolfLogin:
             if not time_range:
                 logging.error("No preferred time range specified in environment variables")
                 return False
-
+    
             start_time, end_time = self._parse_time_range(time_range)
             logging.info(f"Looking for time slots between {start_time} and {end_time}")
             
+            # Wait for time slots to be present in the DOM
+            self.wait_for_element(
+                [(By.CSS_SELECTOR, "div.widget-teetime-tag")], 
+                timeout=15, 
+                condition="presence"
+            )
+            
             # Get all time elements and their associated clickable elements
             available_slots = []
-            time.sleep(2)  # Wait for time slots to load
             time_elements = self.driver.find_elements(By.CSS_SELECTOR, "div.widget-teetime-tag")
             
             for time_element in time_elements:
@@ -396,11 +540,19 @@ class ChronogolfLogin:
             logging.info(f"Selected middle slot: {selected_time}")
             self.save_screenshot("07_before_time_selection.png")
             
-            selected_price_element.click()
+            def click_time():
+                selected_price_element.click()
+                
+            self.retry_on_stale_element(click_time)
+            
             logging.info(f"Clicked time slot for {selected_time.strftime('%I:%M %p')}")
             self.save_screenshot("08_after_time_selection.png")
+            
+            # Wait for time selection to process
+            self.wait_for_ajax()
+            
             return True
-
+    
         except Exception as e:
             logging.error(f"Error selecting time slot: {str(e)}")
             self.save_screenshot("error_time_selection.png")
@@ -409,18 +561,27 @@ class ChronogolfLogin:
     def _continue_to_next_screen(self) -> bool:
         """Internal method to handle continue button."""
         try:
-            continue_button = self._find_element(self.selectors.CONTINUE_BUTTON)
-            if not continue_button:
-                logging.error("Continue button not found")
-                return False
+            continue_button = self.wait_for_element(
+                self.selectors.CONTINUE_BUTTON,
+                condition="clickable"
+            )
             
             if 'disabled' in continue_button.get_attribute('class'):
                 logging.error("Continue button is disabled")
                 return False
+            
+            def click_continue():
+                continue_button.click()
                 
-            continue_button.click()
+            self.retry_on_stale_element(click_continue)
+            
             logging.info("Clicked continue button")
             self.save_screenshot("09_continued_to_next.png")
+            
+            # Wait for next screen to load
+            self.wait_for_page_load()
+            self.wait_for_ajax()
+            
             return True
             
         except Exception as e:
@@ -430,18 +591,27 @@ class ChronogolfLogin:
     def _continue_final_step(self) -> bool:
         """Click the final continue button after time selection."""
         try:
-            continue_button = self._find_element(self.selectors.FINAL_CONTINUE)
-            if not continue_button:
-                logging.error("Final continue button not found")
-                return False
+            continue_button = self.wait_for_element(
+                self.selectors.FINAL_CONTINUE,
+                condition="clickable"
+            )
             
             if 'disabled' in continue_button.get_attribute('class'):
                 logging.error("Final continue button is disabled")
                 return False
+            
+            def click_final_continue():
+                continue_button.click()
                 
-            continue_button.click()
+            self.retry_on_stale_element(click_final_continue)
+            
             logging.info("Clicked final continue button")
             self.save_screenshot("10_final_continue.png")
+            
+            # Wait for next screen to load
+            self.wait_for_page_load()
+            self.wait_for_ajax()
+            
             return True
             
         except Exception as e:
@@ -452,13 +622,17 @@ class ChronogolfLogin:
     def _accept_agreement(self) -> bool:
         """Internal method to handle agreement checkbox."""
         try:
-            time.sleep(2)  # Wait for checkbox to load
+            time.sleep(5)  # Keep this simple to allow for any loading
+            
             checkbox = self._find_element(self.selectors.AGREE_CHECKBOX)
             if not checkbox:
                 logging.error("Agreement checkbox not found")
                 return False
             
             if not checkbox.is_selected():
+                # Add a scroll before clicking
+                self.driver.execute_script("arguments[0].scrollIntoView(true);", checkbox)
+                # Keep your existing click
                 checkbox.click()
                 logging.info("Clicked agreement checkbox")
                 self.save_screenshot("11_agreement_checked.png")
@@ -473,18 +647,27 @@ class ChronogolfLogin:
     def _confirm_booking(self) -> bool:
         """Internal method to handle final confirmation."""
         try:
-            confirm_button = self._find_element(self.selectors.CONFIRM_BOOKING)
-            if not confirm_button:
-                logging.error("Confirm reservation button not found")
-                return False
+            confirm_button = self.wait_for_element(
+                self.selectors.CONFIRM_BOOKING,
+                condition="clickable"
+            )
             
             if 'disabled' in confirm_button.get_attribute('class'):
                 logging.error("Confirm button is disabled")
                 return False
+            
+            def click_confirm():
+                confirm_button.click()
                 
-            confirm_button.click()
+            self.retry_on_stale_element(click_confirm)
+            
             logging.info("Clicked confirm reservation button")
-            time.sleep(5)  # Wait for confirmation
+            
+            # Wait for confirmation to process
+            WebDriverWait(self.driver, 10).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            
             self.save_screenshot("12_booking_confirmed.png")
             return True
             
@@ -523,18 +706,17 @@ class ChronogolfLogin:
                 (self._accept_agreement, [], "Accepting agreement"),
                 (self._confirm_booking, [], "Confirming booking")
             ]
-
+    
             # Execute each step in sequence
             for step_func, args, desc in steps:
                 logging.info(f"Attempting: {desc}")
                 if not step_func(*args):
                     logging.error(f"Failed at: {desc}")
                     return False
-                time.sleep(1)  # Small delay between steps
-
+    
             logging.info("Booking flow completed successfully!")
             return True
-
+    
         except Exception as e:
             logging.error(f"Error in booking flow: {str(e)}")
             return False
@@ -603,8 +785,11 @@ class ChronogolfLogin:
             
             self.driver.get(self.site_url)
             logging.info(f"Navigated to {self.site_url}")
+            
+            # Wait for page to fully load
+            self.wait_for_page_load()
+            
             self.save_screenshot("01_initial_page.png")
-            time.sleep(2)  # Wait for page load
             return True
             
         except Exception as e:
