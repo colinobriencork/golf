@@ -398,11 +398,22 @@ class ChronogolfLogin:
             # Format the xpath with the target day
             date_xpath = f"//button[contains(@class, 'btn-sm')]//span[text()='{target_date.day}']/.."
             
-            # Wait for the specific date button to be clickable
-            date_button = WebDriverWait(self.driver, self.config.DEFAULT_WAIT_TIMEOUT).until(
-                EC.element_to_be_clickable((By.XPATH, date_xpath))
-            )
+            # Find all matching buttons
+            date_buttons = self.driver.find_elements(By.XPATH, date_xpath)
             
+            # Find the first button where the span doesn't have text-muted class
+            for button in date_buttons:
+                span = button.find_element(By.TAG_NAME, 'span')
+                if 'text-muted' not in span.get_attribute('class') and not button.get_attribute('disabled'):
+                    # Found a valid current month button
+                    date_button = button
+                    break
+            else:
+                # No valid button found
+                logging.error(f"Date {target_date_str} is not available in the current month")
+                return False
+                
+            # Check if button is disabled
             if 'disabled' in date_button.get_attribute('class'):
                 logging.error(f"Date {target_date_str} is not available for booking")
                 return False
@@ -419,7 +430,10 @@ class ChronogolfLogin:
             self.wait_for_ajax()
             
             return True
-            
+        
+        except Exception as e:
+            logging.error(f"Unexpected error selecting date: {str(e)}")
+            return False
         except BookingError as e:
             logging.error(str(e))
             return False
