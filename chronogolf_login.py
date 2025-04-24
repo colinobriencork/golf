@@ -503,39 +503,41 @@ class ChronogolfLogin:
             if not time_range:
                 logging.error("No preferred time range specified in environment variables")
                 return False
-    
+        
             start_time, end_time = self._parse_time_range(time_range)
             logging.info(f"Looking for time slots between {start_time} and {end_time}")
             
-            # Wait for time slots to be present in the DOM
+            # Wait for containers to be present
             self.wait_for_element(
-                [(By.CSS_SELECTOR, "div.widget-teetime-tag")], 
+                [(By.CSS_SELECTOR, "div.widget-teetime")], 
                 timeout=15, 
                 condition="presence"
             )
             
-            # Get all time elements and their associated clickable elements
+            # Get all container elements
             available_slots = []
-            time_elements = self.driver.find_elements(By.CSS_SELECTOR, "div.widget-teetime-tag")
+            containers = self.driver.find_elements(By.CSS_SELECTOR, "div.widget-teetime")
             
-            for time_element in time_elements:
-                # Find the associated clickable price element
+            for container in containers:
                 try:
-                    # Move up to parent and then find the price link
-                    parent = time_element.find_element(By.XPATH, "./..")
-                    price_element = parent.find_element(By.CSS_SELECTOR, "a.widget-teetime-rate")
+                    # Find the time element within the container
+                    time_element = container.find_element(By.CSS_SELECTOR, "div.widget-teetime-tag")
+                    # Find the price/rate element within the container
+                    price_element = container.find_element(By.CSS_SELECTOR, "a.widget-teetime-rate")
                     
                     # Check if the slot is disabled
-                    if 'disabled' in price_element.get_attribute('class'):
+                    if price_element and 'disabled' in price_element.get_attribute('class'):
                         continue
                     
+                    # Parse the time
                     slot_time = self._parse_time_from_element(time_element)
                     if not slot_time:
                         continue
                     
                     # Check if slot is within preferred range
                     if start_time <= slot_time <= end_time:
-                        logging.info(f"Found available slot: {slot_time} - {price_element.text}")
+                        price_text = price_element.text.strip() if price_element else "N/A"
+                        logging.info(f"Found available slot: {slot_time} - {price_text}")
                         available_slots.append((slot_time, price_element))
                         
                 except NoSuchElementException:
@@ -566,7 +568,7 @@ class ChronogolfLogin:
             self.wait_for_ajax()
             
             return True
-    
+        
         except Exception as e:
             logging.error(f"Error selecting time slot: {str(e)}")
             self.save_screenshot("error_time_selection.png")
