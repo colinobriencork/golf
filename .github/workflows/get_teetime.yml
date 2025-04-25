@@ -42,6 +42,7 @@ jobs:
           BOOKING_URL=${{ vars.BOOKING_URL }}
           PREFERRED_TIME_RANGE=${{ vars.PREFERRED_TIME_RANGE }}
           NUMBER_OF_PLAYERS=${{ vars.NUMBER_OF_PLAYERS }}
+          TEST_MODE=${{ vars.TEST_MODE }}
           EOF 
       - name: Run login script
         run: make run
