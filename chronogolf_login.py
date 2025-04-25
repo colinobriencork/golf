@@ -105,7 +105,7 @@ class Selectors:
 class BookingConfig:
     """Store booking configuration"""
     RELEASE_TIME = datetime.time(7, 0)  # 7:00 AM
-    ADVANCE_DAYS = 7
+    ADVANCE_DAYS = 7 # Number of days in advance to book
     PRE_ATTEMPT_SECONDS = 10  # Start trying 10 seconds before
     MAX_RETRIES = 60  # Retry for up to 1 minute
     RETRY_DELAY = 1  # Wait 1 second between retries
@@ -314,7 +314,6 @@ class ChronogolfLogin:
             
             # Then handle the login form
             self._handle_login_form()
-            time.sleep(5)  # Wait for login processing
             
             # Verify login success
             if not self._verify_login_success():
