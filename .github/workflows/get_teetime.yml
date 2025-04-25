@@ -2,8 +2,8 @@ name: Book Golf Tee Time
 
 on:
   schedule:
-    # Runs at 6:55 AM UTC every day
-    - cron: '55 6 * * *'
+    # Runs at 6:55 AM Pacific Time (13:55 UTC) on Saturdays and Sundays only
+    - cron: '55 13 * * 0,6'
   
   # Allow manual triggering for testing
   workflow_dispatch:
