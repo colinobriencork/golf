@@ -3,6 +3,7 @@ import logging
 import time
 import datetime
 from pathlib import Path
+import pytz
 from typing import Dict, Optional, Tuple, List, Callable, Any
 from dataclasses import dataclass
 from dotenv import load_dotenv
@@ -15,6 +16,8 @@ from selenium.common.exceptions import NoSuchElementException, StaleElementRefer
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from enum import Enum, auto
+
+pacific_tz = pytz.timezone('US/Pacific')
 
 class BookingMode(Enum):
     TEST = auto()
@@ -114,7 +117,7 @@ class BookingConfig:
     @property
     def target_date(self) -> datetime.date:
         """Calculate target booking date"""
-        return datetime.datetime.now().date() + datetime.timedelta(days=self.ADVANCE_DAYS)
+        return datetime.datetime.now(pacific_tz).date() + datetime.timedelta(days=self.ADVANCE_DAYS)
     
     @property
     def target_date_str(self) -> str:
@@ -123,7 +126,7 @@ class BookingConfig:
 
 def setup_output_dirs() -> Dict[str, Path]:
     """Create and return organized directories for logs and screenshots."""
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.datetime.now(pacific_tz).strftime("%Y%m%d_%H%M%S")
     base_dir = Path("chronogolf_output")
     run_dir = base_dir / f"run_{timestamp}"
     
@@ -676,7 +679,7 @@ class ChronogolfLogin:
             return False
 
     def wait_for_release_time(self) -> bool:
-        now = datetime.datetime.now()
+        now = datetime.datetime.now(pacific_tz)
         release_datetime = datetime.datetime.combine(now.date(), self.config.RELEASE_TIME)
         
         if now.time() > self.config.RELEASE_TIME:

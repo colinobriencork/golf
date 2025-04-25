@@ -11,6 +11,7 @@ flake8 = "==6.0.0"
 selenium = ">=4.11.2"
 python-dotenv = ">=1.0.0"
 webdriver-manager = ">=4.0.0"
+pytz = "*"
 
 [requires]
 python_version = "3.13"
