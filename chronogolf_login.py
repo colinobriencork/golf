@@ -338,7 +338,7 @@ class ChronogolfLogin:
                 timeout=15,  # Give extra time for login to process
                 condition="visible"
             )
-            logging.info("Login successful!")
+            logging.info(f"Login successful! here is the verifying element: {success_element.text}")
             self.save_screenshot("04_login_successful.png")
             return True
         except Exception:
@@ -384,63 +384,47 @@ class ChronogolfLogin:
                     condition="visible"
                 )
                 current_month = self._parse_month_title(month_title.text)
-                
         except BookingError as e:
             logging.error(f"Failed to navigate to target month: {str(e)}")
             raise
 
     def _select_date(self, target_date_str: str) -> bool:
-        """Internal method to select a date."""
+        """Select a date from the datepicker."""
         try:
             target_date = datetime.datetime.strptime(target_date_str, '%Y-%m-%d')
             self._navigate_to_target_month(target_date)
             
-            # Format the xpath with the target day
-            date_xpath = f"//button[contains(@class, 'btn-sm')]//span[text()='{target_date.day}']/.."
+            # Format day with leading zero if needed
+            day_str = f"{target_date.day:02d}"  # Ensures "5" becomes "05"
             
-            # Find all matching buttons
-            date_buttons = self.driver.find_elements(By.XPATH, date_xpath)
+            # Look for non-muted spans with the target day
+            xpath = f"//span[not(contains(@class, 'text-muted')) and text()='{day_str}']"
+            spans = self.driver.find_elements(By.XPATH, xpath)
             
-            # Find the first button where the span doesn't have text-muted class
-            for button in date_buttons:
-                span = button.find_element(By.TAG_NAME, 'span')
-                if 'text-muted' not in span.get_attribute('class') and not button.get_attribute('disabled'):
-                    # Found a valid current month button
-                    date_button = button
-                    break
-            else:
-                # No valid button found
-                logging.error(f"Date {target_date_str} is not available in the current month")
+            if not spans:
+                logging.error(f"Could not find date {target_date_str} in current month")
                 return False
                 
-            # Check if button is disabled
-            if 'disabled' in date_button.get_attribute('class'):
-                logging.error(f"Date {target_date_str} is not available for booking")
+            # Get the parent button and check if it's disabled
+            date_button = spans[0].find_element(By.XPATH, "..")
+            if date_button.get_attribute("disabled") == "true":
+                logging.error(f"Date {target_date_str} is disabled/unavailable")
                 return False
-            
-            def click_date():
-                date_button.click()
                 
-            self.retry_on_stale_element(click_date)
+            # Click the button
+            date_button.click()
             
             logging.info(f"Selected date: {target_date_str}")
-            self.save_screenshot("05_selected_date.png")
+            self.save_screenshot("date_selected.png")
             
-            # Wait for date selection to process
+            # Wait for selection to process
             self.wait_for_ajax()
-            
             return True
-        
+            
         except Exception as e:
-            logging.error(f"Unexpected error selecting date: {str(e)}")
+            logging.error(f"Error selecting date: {str(e)}")
             return False
-        except BookingError as e:
-            logging.error(str(e))
-            return False
-        except Exception as e:
-            logging.error(f"Unexpected error selecting date: {str(e)}")
-            return False
-
+    
     def _select_players(self, num_players: int) -> bool:
         """Internal method to select number of players."""
         try:
