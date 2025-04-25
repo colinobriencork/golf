@@ -1,4 +1,4 @@
-name: Morning Chronogolf Login
+name: Book Golf Tee Time
 
 on:
   schedule:
@@ -11,7 +11,7 @@ on:
 jobs:
   golf-booking:
     # Only run if WORKFLOW_ENABLED is true or this is a manual trigger
-    if: github.event_name == 'workflow_dispatch' || secrets.WORKFLOW_ENABLED == 'true'
+    if: github.event_name == 'workflow_dispatch' || vars.WORKFLOW_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -26,17 +26,22 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pipenv
+
+      - name: Install dependencies
+        run: |
+          make install
       
       - name: Setup Chrome
         uses: browser-actions/setup-chrome@latest
       
       - name: Create .env file with secrets
         run: |
-          echo "GOLF_USERNAME=${{ secrets.GOLF_USERNAME }}" > .env
-          echo "GOLF_PASSWORD=${{ secrets.GOLF_PASSWORD }}" >> .env
-          echo "BOOKING_URL=${{ secrets.BOOKING_URL }}" >> .env
-          echo "PREFERRED_TIME_RANGE=${{ secrets.PREFERRED_TIME_RANGE }}" >> .env
-          echo "NUMBER_OF_PLAYERS=${{ secrets.NUMBER_OF_PLAYERS }}" >> .env
-      
+          cat > .env << 'EOF'
+          GOLF_USERNAME=${{ secrets.GOLF_USERNAME }}
+          GOLF_PASSWORD=${{ secrets.GOLF_PASSWORD }}
+          BOOKING_URL=${{ vars.BOOKING_URL }}
+          PREFERRED_TIME_RANGE=${{ vars.PREFERRED_TIME_RANGE }}
+          NUMBER_OF_PLAYERS=${{ vars.NUMBER_OF_PLAYERS }}
+          EOF 
       - name: Run login script
         run: make run
