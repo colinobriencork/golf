@@ -845,7 +845,7 @@ def main() -> bool:
         
     except Exception as e:
         logging.error(f"Fatal error: {str(e)}")
-        return False
+        raise e
     finally:
         booking.close()
 
