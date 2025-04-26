@@ -107,7 +107,7 @@ class Selectors:
 @dataclass
 class BookingConfig:
     """Store booking configuration"""
-    RELEASE_TIME = datetime.time(8, 30, tzinfo=pacific_tz)  # 7:00 AM
+    RELEASE_TIME = datetime.time(7, 0, tzinfo=pacific_tz)  # 7:00 AM
     ADVANCE_DAYS = 7 # Number of days in advance to book
     PRE_ATTEMPT_SECONDS = 10  # Start trying 10 seconds before
     MAX_RETRIES = 60  # Retry for up to 1 minute
