@@ -340,7 +340,6 @@ class ChronogolfLogin:
                 timeout=15,  # Give extra time for login to process
                 condition="visible"
             )
-            logging.info(f"Login successful! here is the verifying element: {success_element.text}")
             self.save_screenshot("04_login_successful.png")
             return True
         except Exception:
@@ -683,7 +682,7 @@ class ChronogolfLogin:
         release_datetime = datetime.datetime.combine(now.date(), self.config.RELEASE_TIME)
         
         if now.time() > self.config.RELEASE_TIME:
-            logging.error(f"Current time ({now.time()}) is past release time ({self.config.RELEASE_TIME})")
+            logging.error(f"Current time ({now.time().strftime('%I:%M %p')}) is past release time ({self.config.RELEASE_TIME.strftime('%I:%M %p')})")
             logging.error(f"Cannot book for target date {self.config.target_date_str}")
             logging.error("Please run the script before the release time")
             return False
@@ -691,7 +690,7 @@ class ChronogolfLogin:
         start_time = release_datetime - datetime.timedelta(seconds=self.config.PRE_ATTEMPT_SECONDS)
         wait_seconds = (start_time - now).total_seconds()
         if wait_seconds > 0:
-            logging.info(f"Waiting until {start_time} before attempting booking for {self.config.target_date_str}")
+            logging.info(f"Waiting until {start_time.strftime('%I:%M:%S %p %Z')} before attempting booking for {self.config.target_date_str}")
             time.sleep(wait_seconds)
         return True
 
@@ -724,19 +723,39 @@ class ChronogolfLogin:
             return False
 
     def retry_booking_flow(self) -> bool:
-        """Retry the booking flow until successful or max retries reached."""
+        """Retry the booking flow by refreshing the page until time slots appear or max retries reached."""
+        # First attempt the initial booking flow
+        if self.perform_booking_flow():
+            logging.info("Booking successful on first attempt!")
+            return True
+
         retries = 0
         logging.info(f"Beginning retry attempts for date: {self.config.target_date_str}")
         
         while retries < self.config.MAX_RETRIES:
             try:
-                if self.perform_booking_flow():
-                    logging.info("Booking successful!")
-                    return True
+                logging.info(f"Refreshing page (attempt {retries + 1}/{self.config.MAX_RETRIES})...")
+                self.driver.refresh()
+                self.wait_for_page_load()
+                self.wait_for_ajax()
+                
+                # Wait for time slot elements
+                try:
+                    self.wait_for_element(
+                        [(By.CSS_SELECTOR, "div.widget-teetime")],
+                        timeout=2,
+                        condition="presence"
+                    )
+                    # If we find time slots, try to complete the booking
+                    if self._select_time_slot():
+                        if self.complete_booking():
+                            logging.info("Booking successful after refresh!")
+                            return True
+                except (NoSuchElementException, TimeoutException):
+                    logging.info("No time slots available yet")
                 
                 retries += 1
                 if retries < self.config.MAX_RETRIES:
-                    logging.info(f"Retry {retries}/{self.config.MAX_RETRIES}...")
                     time.sleep(self.config.RETRY_DELAY)
                     
             except Exception as e:
@@ -850,4 +869,5 @@ def main() -> bool:
         booking.close()
 
 if __name__ == "__main__":
-    main()
+    success = main()
+    exit(0 if success else 1)
