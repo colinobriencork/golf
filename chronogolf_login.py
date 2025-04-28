@@ -112,7 +112,7 @@ class BookingConfig:
     PRE_ATTEMPT_SECONDS = 10  # Start trying 10 seconds before
     MAX_RETRIES = 60  # Retry for up to 1 minute
     RETRY_DELAY = 1  # Wait 1 second between retries
-    DEFAULT_WAIT_TIMEOUT = 10  # Default timeout for waits in seconds
+    DEFAULT_WAIT_TIMEOUT = 3  # Default timeout for waits in seconds
     
     @property
     def target_date(self) -> datetime.date:
@@ -158,28 +158,26 @@ class ChronogolfLogin:
         if timeout is None:
             timeout = self.config.DEFAULT_WAIT_TIMEOUT
             
-        end_time = time.time() + timeout
         last_exception = None
         
-        while time.time() < end_time:
-            for selector_type, selector in selectors:
-                try:
-                    if condition == "presence":
-                        return WebDriverWait(self.driver, 1).until(
-                            EC.presence_of_element_located((selector_type, selector))
-                        )
-                    elif condition == "clickable":
-                        return WebDriverWait(self.driver, 1).until(
-                            EC.element_to_be_clickable((selector_type, selector))
-                        )
-                    elif condition == "visible":
-                        return WebDriverWait(self.driver, 1).until(
-                            EC.visibility_of_element_located((selector_type, selector))
-                        )
-                except (NoSuchElementException, TimeoutException) as e:
-                    last_exception = e
-                    continue
-                
+        for selector_type, selector in selectors:
+            try:
+                if condition == "presence":
+                    return WebDriverWait(self.driver, timeout).until(
+                        EC.presence_of_element_located((selector_type, selector))
+                    )
+                elif condition == "clickable":
+                    return WebDriverWait(self.driver, timeout).until(
+                        EC.element_to_be_clickable((selector_type, selector))
+                    )
+                elif condition == "visible":
+                    return WebDriverWait(self.driver, timeout).until(
+                        EC.visibility_of_element_located((selector_type, selector))
+                    )
+            except (NoSuchElementException, TimeoutException) as e:
+                last_exception = e
+                continue
+            
         if last_exception:
             raise BookingError(f"Element not found with any selector after {timeout} seconds: {last_exception}")
         raise BookingError(f"Element not found with any selector after {timeout} seconds")
@@ -335,7 +333,7 @@ class ChronogolfLogin:
     def _verify_login_success(self) -> bool:
         """Verify if login was successful."""
         try:
-            success_element = self.wait_for_element(
+            self.wait_for_element(
                 self.selectors.LOGIN_SUCCESS, 
                 timeout=15,  # Give extra time for login to process
                 condition="visible"
@@ -722,49 +720,86 @@ class ChronogolfLogin:
             logging.error(f"Error in booking flow: {str(e)}")
             return False
 
-    def retry_booking_flow(self) -> bool:
-        """Retry the booking flow by refreshing the page until time slots appear or max retries reached."""
-        # First attempt the initial booking flow
-        if self.perform_booking_flow():
-            logging.info("Booking successful on first attempt!")
-            return True
-
-        retries = 0
-        logging.info(f"Beginning retry attempts for date: {self.config.target_date_str}")
+    def wait_for_time_slots(self, max_attempts=60):
+       """Wait for time slots to appear, refreshing the page as needed."""
+       for attempt in range(max_attempts):
+           # Wait for page to be ready
+           WebDriverWait(self.driver, 10).until(
+               lambda d: d.execute_script("return document.readyState") == "complete"
+           )
+           
+           # Try to check if AJAX is complete (if jQuery is used)
+           try:
+               is_jquery_done = self.driver.execute_script(
+                   "return typeof jQuery === 'undefined' || jQuery.active === 0"
+               )
+               if not is_jquery_done:
+                   time.sleep(0.1)  # Small wait for AJAX
+                   continue
+           except:
+               pass  # Site might not use jQuery
+               
+           # Check for time elements immediately
+           time_slots = self.driver.find_elements(By.CSS_SELECTOR, "div.widget-teetime")
+           if len(time_slots) > 0:
+               logging.info(f"Time slots found on attempt {attempt+1}")
+               self.save_screenshot(f"time_slots_found_attempt_{attempt+1}.png")
+               return time_slots
+               
+           # No time slots and page is fully loaded - refresh immediately
+           logging.info(f"Page loaded, no time slots found (attempt {attempt+1}/{max_attempts}). Refreshing...")
+           self.driver.refresh()
+       
+       logging.error(f"No time slots found after {max_attempts} attempts")
+       self.save_screenshot("no_time_slots_found.png")
+       return []  # No slots found after all attempts
+    
+    def book_tee_time(self) -> bool:
+       """Book a tee time based on mode."""
+       try:
+           # Initial setup and login for both modes
+           if not self.initialize():
+               return False
+               
+           if not self.login():
+               return False
+           
+           if self.mode == BookingMode.SCHEDULED:
+               # Scheduled mode: Wait until release time
+               if not self.wait_for_release_time():
+                   return False
+                   
+               # Select date and players (this doesn't change between refreshes)
+               if not self._select_date(self.config.target_date_str):
+                   return False
+                   
+               if not self._select_players(int(os.getenv("NUMBER_OF_PLAYERS", "4"))):
+                   return False
+                   
+               if not self._continue_to_next_screen():
+                   return False
+               
+               # Now actively wait for time slots to appear
+               time_slots = self.wait_for_time_slots(max_attempts=self.config.MAX_RETRIES)
+               
+               if not time_slots:
+                   logging.error("No time slots became available")
+                   return False
+                   
+               # Time slots found, select one and complete booking
+               if not self._select_time_slot():
+                   return False
+                   
+               return self.complete_booking()
+           else:
+               # Test mode: Single attempt
+               return self.perform_booking_flow()
+           
+       except Exception as e:
+           logging.error(f"Error booking tee time: {str(e)}")
+           self.save_screenshot("booking_error.png")
+           return False
         
-        while retries < self.config.MAX_RETRIES:
-            try:
-                logging.info(f"Refreshing page (attempt {retries + 1}/{self.config.MAX_RETRIES})...")
-                self.driver.refresh()
-                self.wait_for_page_load()
-                self.wait_for_ajax()
-                
-                # Wait for time slot elements
-                try:
-                    self.wait_for_element(
-                        [(By.CSS_SELECTOR, "div.widget-teetime")],
-                        timeout=2,
-                        condition="presence"
-                    )
-                    # If we find time slots, try to complete the booking
-                    if self._select_time_slot():
-                        if self.complete_booking():
-                            logging.info("Booking successful after refresh!")
-                            return True
-                except (NoSuchElementException, TimeoutException):
-                    logging.info("No time slots available yet")
-                
-                retries += 1
-                if retries < self.config.MAX_RETRIES:
-                    time.sleep(self.config.RETRY_DELAY)
-                    
-            except Exception as e:
-                logging.error(f"Error during retry attempt {retries}: {str(e)}")
-                retries += 1
-        
-        logging.error(f"Failed to complete booking after {self.config.MAX_RETRIES} attempts")
-        return False
-
     def complete_booking(self) -> bool:
         """Complete the final steps of booking."""
         if not self._continue_final_step():
@@ -774,29 +809,6 @@ class ChronogolfLogin:
         if not self._confirm_booking():
             return False
         return True
-
-    def book_tee_time(self) -> bool:
-        """Book a tee time based on mode."""
-        try:
-            # Initial setup and login for both modes
-            if not self.initialize():
-                return False
-                
-            if not self.login():
-                return False
-            
-            if self.mode == BookingMode.SCHEDULED:
-                # Scheduled mode: Wait and retry
-                if not self.wait_for_release_time():
-                    return False
-                return self.retry_booking_flow()
-            else:
-                # Test mode: Single attempt
-                return self.perform_booking_flow()
-            
-        except Exception as e:
-            logging.error(f"Error booking tee time: {str(e)}")
-            return False
 
     def navigate_to_site(self) -> bool:
         """Navigate to the booking site."""
