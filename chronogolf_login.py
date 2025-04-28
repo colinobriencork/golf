@@ -414,7 +414,7 @@ class ChronogolfLogin:
             date_button.click()
             
             logging.info(f"Selected date: {target_date_str}")
-            self.save_screenshot("date_selected.png")
+            self.save_screenshot("05_date_selected.png")
             
             # Wait for selection to process
             self.wait_for_ajax()
