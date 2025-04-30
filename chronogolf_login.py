@@ -735,15 +735,7 @@ class ChronogolfLogin:
            )
            
            # Try to check if AJAX is complete (if jQuery is used)
-           try:
-               is_jquery_done = self.driver.execute_script(
-                   "return typeof jQuery === 'undefined' || jQuery.active === 0"
-               )
-               if not is_jquery_done:
-                   time.sleep(0.1)  # Small wait for AJAX
-                   continue
-           except:
-               pass  # Site might not use jQuery
+           self.wait_for_ajax()
                
            # Check for time elements immediately
            time_slots = self.driver.find_elements(By.CSS_SELECTOR, "div.widget-teetime")
@@ -754,11 +746,12 @@ class ChronogolfLogin:
                
            # No time slots and page is fully loaded - refresh immediately
            logging.info(f"Page loaded, no time slots found (attempt {attempt+1}/{max_attempts}). Refreshing...")
-           self.driver.refresh()
-       
-       logging.error(f"No time slots found after {max_attempts} attempts")
-       self.save_screenshot("no_time_slots_found.png")
-       return []  # No slots found after all attempts
+           if attempt == max_attempts - 1:
+               logging.error(f"No time slots found after {max_attempts} attempts")
+               self.save_screenshot("no_time_slots_found.png")
+               return []  # No slots found after all attempts
+           else:
+               self.driver.refresh()
     
     def book_tee_time(self) -> bool:
        """Book a tee time based on mode."""
