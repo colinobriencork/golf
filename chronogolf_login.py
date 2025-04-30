@@ -107,8 +107,8 @@ class Selectors:
 @dataclass
 class BookingConfig:
     """Store booking configuration"""
-    RELEASE_TIME = datetime.time(7, 0)  # 7:00 AM
-    ADVANCE_DAYS = 7 # Number of days in advance to book
+    RELEASE_TIME = datetime.time(20, 30)  # 7:00 AM
+    ADVANCE_DAYS = 6 # Number of days in advance to book
     PRE_ATTEMPT_SECONDS = 10  # Start trying 10 seconds before
     MAX_RETRIES = 60  # Retry for up to 1 minute
     RETRY_DELAY = 1  # Wait 1 second between retries
@@ -186,10 +186,14 @@ class ChronogolfLogin:
         """Wait for page to fully load."""
         if timeout is None:
             timeout = self.config.DEFAULT_WAIT_TIMEOUT
-            
         try:
             WebDriverWait(self.driver, timeout).until(
                 lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            self.wait_for_element(
+                [(By.CSS_SELECTOR, ".widget-steps.ng-scope")], 
+                timeout=timeout, 
+                condition="presence"
             )
             return True
         except Exception as e:
@@ -539,10 +543,7 @@ class ChronogolfLogin:
             logging.info(f"Selected middle slot: {selected_time}")
             self.save_screenshot("07_before_time_selection.png")
             
-            def click_time():
-                selected_price_element.click()
-                
-            self.retry_on_stale_element(click_time)
+            self.retry_on_stale_element(selected_price_element.click)
             
             logging.info(f"Clicked time slot for {selected_time.strftime('%I:%M %p')}")
             self.save_screenshot("08_after_time_selection.png")
@@ -556,6 +557,32 @@ class ChronogolfLogin:
             logging.error(f"Error selecting time slot: {str(e)}")
             self.save_screenshot("error_time_selection.png")
             return False
+        
+    def wait_for_time_slots(self, max_attempts=60):
+       """Wait for time slots to appear, refreshing the page as needed."""
+       for attempt in range(max_attempts):
+           # Wait for page to be ready
+           self.wait_for_page_load()
+           self.wait_for_ajax()
+           self.wait_for_element(
+               [(By.CSS_SELECTOR, "div.widget-teetime")], 
+               timeout=1.5, 
+               condition="presence"
+           )
+           time_slots = self.driver.find_elements(By.CSS_SELECTOR, "div.widget-teetime")
+           if len(time_slots) > 0:
+               logging.info(f"Time slots found on attempt {attempt+1}")
+               self.save_screenshot(f"time_slots_found_attempt_{attempt+1}.png")
+               return time_slots
+               
+           # No time slots and page is fully loaded - refresh immediately
+           logging.info(f"Page loaded, no time slots found (attempt {attempt+1}/{max_attempts}). Refreshing...")
+           if attempt == max_attempts - 1:
+               logging.error(f"No time slots found after {max_attempts} attempts")
+               self.save_screenshot("no_time_slots_found.png")
+               return []  # No slots found after all attempts
+           else:
+               self.driver.refresh()
 
     def _continue_to_next_screen(self) -> bool:
         """Internal method to handle continue button."""
@@ -607,10 +634,6 @@ class ChronogolfLogin:
             logging.info("Clicked final continue button")
             self.save_screenshot("10_final_continue.png")
             
-            # Wait for next screen to load
-            self.wait_for_page_load()
-            self.wait_for_ajax()
-            
             return True
             
         except Exception as e:
@@ -654,18 +677,12 @@ class ChronogolfLogin:
             if 'disabled' in confirm_button.get_attribute('class'):
                 logging.error("Confirm button is disabled")
                 return False
-            
-            def click_confirm():
-                confirm_button.click()
                 
-            self.retry_on_stale_element(click_confirm)
+            self.retry_on_stale_element(confirm_button.click)
             
             logging.info("Clicked confirm reservation button")
             
-            # Wait for confirmation to process
-            WebDriverWait(self.driver, 10).until(
-                lambda d: d.execute_script("return document.readyState") == "complete"
-            )
+            self.wait_for_page_load()
             
             self.save_screenshot("12_booking_confirmed.png")
             return True
@@ -725,33 +742,6 @@ class ChronogolfLogin:
         except Exception as e:
             logging.error(f"Error in booking flow: {str(e)}")
             return False
-
-    def wait_for_time_slots(self, max_attempts=60):
-       """Wait for time slots to appear, refreshing the page as needed."""
-       for attempt in range(max_attempts):
-           # Wait for page to be ready
-           WebDriverWait(self.driver, 10).until(
-               lambda d: d.execute_script("return document.readyState") == "complete"
-           )
-           
-           # Try to check if AJAX is complete (if jQuery is used)
-           self.wait_for_ajax()
-               
-           # Check for time elements immediately
-           time_slots = self.driver.find_elements(By.CSS_SELECTOR, "div.widget-teetime")
-           if len(time_slots) > 0:
-               logging.info(f"Time slots found on attempt {attempt+1}")
-               self.save_screenshot(f"time_slots_found_attempt_{attempt+1}.png")
-               return time_slots
-               
-           # No time slots and page is fully loaded - refresh immediately
-           logging.info(f"Page loaded, no time slots found (attempt {attempt+1}/{max_attempts}). Refreshing...")
-           if attempt == max_attempts - 1:
-               logging.error(f"No time slots found after {max_attempts} attempts")
-               self.save_screenshot("no_time_slots_found.png")
-               return []  # No slots found after all attempts
-           else:
-               self.driver.refresh()
     
     def book_tee_time(self) -> bool:
        """Book a tee time based on mode."""
