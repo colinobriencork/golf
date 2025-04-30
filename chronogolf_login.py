@@ -107,7 +107,7 @@ class Selectors:
 @dataclass
 class BookingConfig:
     """Store booking configuration"""
-    RELEASE_TIME = datetime.time(7, 0, tzinfo=pacific_tz)  # 7:00 AM
+    RELEASE_TIME = datetime.time(7, 0)  # 7:00 AM
     ADVANCE_DAYS = 7 # Number of days in advance to book
     PRE_ATTEMPT_SECONDS = 10  # Start trying 10 seconds before
     MAX_RETRIES = 60  # Retry for up to 1 minute
@@ -677,10 +677,16 @@ class ChronogolfLogin:
 
     def wait_for_release_time(self) -> bool:
         now = datetime.datetime.now(pacific_tz)
-        release_datetime = datetime.datetime.combine(now.date(), self.config.RELEASE_TIME)
         
-        if now.time() > self.config.RELEASE_TIME:
-            logging.error(f"Current time ({now.time().strftime('%I:%M %p')}) is past release time ({self.config.RELEASE_TIME.strftime('%I:%M %p')})")
+        # Create a naive datetime at X:00 AM on today's date
+        naive_release_datetime = datetime.datetime.combine(now.date(), self.config.RELEASE_TIME)
+        
+        # Interpret it as Pacific time (not converting from UTC)
+        release_datetime = pacific_tz.localize(naive_release_datetime)
+        
+        # Now both datetimes are in Pacific time for proper comparison
+        if now > release_datetime:
+            logging.error(f"Current time ({now.strftime('%I:%M %p %Z')}) is past release time ({release_datetime.strftime('%I:%M %p %Z')})")
             logging.error(f"Cannot book for target date {self.config.target_date_str}")
             logging.error("Please run the script before the release time")
             return False
