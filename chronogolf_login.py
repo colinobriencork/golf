@@ -558,31 +558,50 @@ class ChronogolfLogin:
             self.save_screenshot("error_time_selection.png")
             return False
         
-    def wait_for_time_slots(self, max_attempts=60):
-       """Wait for time slots to appear, refreshing the page as needed."""
-       for attempt in range(max_attempts):
-           # Wait for page to be ready
-           self.wait_for_page_load()
-           self.wait_for_ajax()
-           self.wait_for_element(
-               [(By.CSS_SELECTOR, "div.widget-teetime")], 
-               timeout=1.5, 
-               condition="presence"
-           )
-           time_slots = self.driver.find_elements(By.CSS_SELECTOR, "div.widget-teetime")
-           if len(time_slots) > 0:
-               logging.info(f"Time slots found on attempt {attempt+1}")
-               self.save_screenshot(f"time_slots_found_attempt_{attempt+1}.png")
-               return time_slots
-               
-           # No time slots and page is fully loaded - refresh immediately
-           logging.info(f"Page loaded, no time slots found (attempt {attempt+1}/{max_attempts}). Refreshing...")
-           if attempt == max_attempts - 1:
-               logging.error(f"No time slots found after {max_attempts} attempts")
-               self.save_screenshot("no_time_slots_found.png")
-               return []  # No slots found after all attempts
-           else:
-               self.driver.refresh()
+    def wait_for_time_slots(self, max_attempts: int = 60) -> List[WebElement]:
+        """Wait for time slots to appear, refreshing the page as needed.
+        
+        Args:
+            max_attempts: Maximum number of refresh attempts before giving up.
+            
+        Returns:
+            List of WebElement: Found time slot elements or empty list if none found.
+        """
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # Wait for basic page elements
+                if not self.wait_for_page_load():
+                    continue
+                if not self.wait_for_ajax():
+                    continue
+                
+                # Look for time slots with short timeout
+                slots = WebDriverWait(self.driver, 1.5).until(
+                    EC.presence_of_all_elements_located(
+                        (By.CSS_SELECTOR, "div.widget-teetime")
+                    )
+                )
+                
+                if slots:
+                    logging.info(f"Time slots found on attempt {attempt}")
+                    self.save_screenshot(f"time_slots_found_attempt_{attempt}.png")
+                    return slots
+                
+            except TimeoutException:
+                # Expected exception when no slots found
+                logging.info(f"No time slots found (attempt {attempt}/{max_attempts})")
+            except Exception as e:
+                # Log unexpected errors but continue trying
+                logging.warning(f"Unexpected error on attempt {attempt}: {str(e)}")
+            
+            # Only refresh if we haven't reached max attempts
+            if attempt < max_attempts:
+                self.driver.refresh()
+            else:
+                logging.error(f"No time slots found after {max_attempts} attempts")
+                self.save_screenshot("no_time_slots_found.png")
+                
+        return []
 
     def _continue_to_next_screen(self) -> bool:
         """Internal method to handle continue button."""
