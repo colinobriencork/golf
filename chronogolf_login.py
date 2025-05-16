@@ -77,7 +77,11 @@ class Selectors:
     ]
     PLAYER_BUTTONS = [
         (By.CSS_SELECTOR, "a.toggler-heading.fl-button[ng-model='step.nbPlayers']"),
-        (By.XPATH, "//a[contains(@class, 'toggler-heading') and contains(text(), '{}')]")
+        (By.CSS_SELECTOR, "a.toggler-heading[ng-model='step.nbPlayers']"),
+        (By.CSS_SELECTOR, "a[ng-model='step.nbPlayers']"),
+        (By.XPATH, "//a[contains(@class, 'toggler-heading') and contains(text(), '{}')]"),
+        (By.XPATH, "//a[contains(@class, 'fl-button') and contains(text(), '{}')]"),
+        (By.XPATH, "//a[contains(@ng-model, 'nbPlayers') and contains(text(), '{}')]")
     ]
     CONTINUE_BUTTON = [
         (By.CSS_SELECTOR, "button.fl-button-primary[ng-click*='continue']"),
@@ -431,21 +435,25 @@ class ChronogolfLogin:
     def _select_players(self, num_players: int) -> bool:
         """Internal method to select number of players."""
         try:
-            # Try finding the specific player button using the number
-            player_xpath = f"//a[contains(@class, 'toggler-heading') and contains(text(), '{num_players}')]"
+            # Format selectors with the player number where needed
+            formatted_selectors = []
+            for selector_type, selector in self.selectors.PLAYER_BUTTONS:
+                if '{}' in selector:
+                    formatted_selectors.append((selector_type, selector.format(num_players)))
             
-            # Wait for player selection to be available
-            player_button = WebDriverWait(self.driver, self.config.DEFAULT_WAIT_TIMEOUT).until(
-                EC.element_to_be_clickable((By.XPATH, player_xpath))
+            # Try to find and click the player button using any of our selectors
+            player_button = self.wait_for_element(
+                formatted_selectors,
+                condition="clickable"
             )
             
             if 'disabled' in player_button.get_attribute('class'):
                 logging.error(f"Cannot select {num_players} players - option is disabled")
                 return False
-                
+            
             def click_player():
                 player_button.click()
-                
+            
             self.retry_on_stale_element(click_player)
             
             logging.info(f"Selected {num_players} players")
@@ -456,9 +464,6 @@ class ChronogolfLogin:
             
             return True
             
-        except NoSuchElementException:
-            logging.error(f"Could not find button for {num_players} players")
-            return False
         except Exception as e:
             logging.error(f"Error selecting number of players: {str(e)}")
             return False
