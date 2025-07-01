@@ -14,7 +14,7 @@ shell:
 
 # Run the booking script
 run:
-	pipenv run python src/main.py
+	pipenv run python -m src.main
 
 # Clean up cached files
 clean:
