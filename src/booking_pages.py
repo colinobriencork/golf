@@ -31,13 +31,19 @@ class LoginPage(BasePage):
         """Execute login process."""
         try:
             # Click login tab
+            self.logger.info("Clicking login tab...")
             tab = self.element_manager.find_element_safe(
                 self.selectors.MEMBERS_TAB, condition="clickable"
             )
-            if not tab or not self.element_manager.click_element_safe(tab):
+            if not tab:
+                self.logger.error("Login tab not found")
+                return False
+            if not self.element_manager.click_element_safe(tab):
+                self.logger.error("Could not click login tab")
                 return False
 
             # Fill form
+            self.logger.info("Filling login form...")
             email = self.element_manager.find_element_safe(
                 self.selectors.EMAIL_FIELD, condition="visible"
             )
@@ -45,7 +51,11 @@ class LoginPage(BasePage):
                 self.selectors.PASSWORD_FIELD, condition="visible"
             )
 
-            if not email or not password_field:
+            if not email:
+                self.logger.error("Email field not found")
+                return False
+            if not password_field:
+                self.logger.error("Password field not found")
                 return False
 
             email.clear()
@@ -54,17 +64,28 @@ class LoginPage(BasePage):
             password_field.send_keys(password)
 
             # Submit
+            self.logger.info("Submitting login form...")
             login_btn = self.element_manager.find_element_safe(
                 self.selectors.LOGIN_BUTTON, condition="clickable"
             )
-            if not login_btn or not self.element_manager.click_element_safe(login_btn):
+            if not login_btn:
+                self.logger.error("Login button not found")
+                return False
+            if not self.element_manager.click_element_safe(login_btn):
+                self.logger.error("Could not click login button")
                 return False
 
             # Verify success
+            self.logger.info("Verifying login success...")
             success = self.element_manager.find_element_safe(
                 self.selectors.LOGIN_SUCCESS, timeout=15, condition="visible"
             )
-            return success is not None
+            if success:
+                self.logger.info("Login verification successful")
+                return True
+            else:
+                self.logger.error("Login verification failed - success indicator not found")
+                return False
 
         except Exception as e:
             self.logger.error(f"Login failed: {e}")

@@ -32,18 +32,28 @@ class TestModeStrategy(BookingStrategy):
 
     def execute_booking(self, output_dirs: dict[str, Path]) -> bool:
         """Execute test mode booking."""
+        self.logger.info("🎯 Starting test mode booking flow...")
+        
         # Simple flow for test mode
         steps = [
-            self.pages.date.select_date,
-            self.pages.player.select_players,
-            self.pages.confirmation.continue_to_next_screen,
-            self._select_time_slot,
-            self.pages.confirmation.continue_final_step,
-            self.pages.confirmation.accept_agreement,
-            self.pages.confirmation.confirm_booking,
+            ("Date Selection", self.pages.date.select_date),
+            ("Player Selection", self.pages.player.select_players),
+            ("Continue to Time Slots", self.pages.confirmation.continue_to_next_screen),
+            ("Time Slot Selection", self._select_time_slot),
+            ("Continue Final", self.pages.confirmation.continue_final_step),
+            ("Accept Agreement", self.pages.confirmation.accept_agreement),
+            ("Confirm Booking", self.pages.confirmation.confirm_booking),
         ]
 
-        return all(self._execute_step(step, output_dirs) for step in steps)
+        for step_name, step_func in steps:
+            self.logger.info(f"🔄 Executing step: {step_name}")
+            if not self._execute_step(step_func, output_dirs):
+                self.logger.error(f"❌ Step failed: {step_name}")
+                return False
+            self.logger.info(f"✅ Step completed: {step_name}")
+            
+        self.logger.info("✅ All booking steps completed successfully!")
+        return True
 
     def _execute_step(self, step_func: Any, output_dirs: dict[str, Path]) -> bool:
         """Execute a single step with error handling."""

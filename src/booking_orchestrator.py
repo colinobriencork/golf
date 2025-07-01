@@ -125,16 +125,30 @@ class BookingOrchestrator:
 
     def login(self) -> bool:
         """Execute login."""
+        self.logger.info("🔑 Starting login process...")
         if self.pages:
-            return bool(
+            success = bool(
                 self.pages.login.login(self.username, self.password, self.output_dirs)
             )
+            if success:
+                self.logger.info("✅ Login successful")
+            else:
+                self.logger.error("❌ Login failed")
+            return success
+        self.logger.error("❌ Login failed - pages not initialized")
         return False
 
     def execute_booking(self) -> bool:
         """Execute booking strategy."""
+        self.logger.info("📅 Starting booking execution...")
         if self.strategy:
-            return bool(self.strategy.execute_booking(self.output_dirs))
+            success = bool(self.strategy.execute_booking(self.output_dirs))
+            if success:
+                self.logger.info("✅ Booking execution successful")
+            else:
+                self.logger.error("❌ Booking execution failed")
+            return success
+        self.logger.error("❌ Booking failed - strategy not initialized")
         return False
 
     def book_tee_time(self) -> bool:
