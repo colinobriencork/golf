@@ -101,7 +101,7 @@ class TestBookingConfig:
         """Test that BookingConfig can be initialized with defaults."""
         config = BookingConfig()
         assert datetime.time(7, 0) == config.RELEASE_TIME
-        assert config.ADVANCE_DAYS == 7
+        assert config.advance_days >= 1  # Should read from env or use default
         assert config.PRE_ATTEMPT_SECONDS == 10
         assert config.MAX_RETRIES == 60
         assert config.RETRY_DELAY == 1
@@ -113,10 +113,16 @@ class TestBookingConfig:
         config = BookingConfig()
         pacific_tz = pytz.timezone("US/Pacific")
 
-        # Mock the current time
+        # Mock the current time and advance days
         mock_now = datetime.datetime(2024, 4, 15, 10, 0, 0, tzinfo=pacific_tz)
-        with patch("datetime.datetime") as mock_datetime:
-            mock_datetime.now.return_value = mock_now
+        with (
+            patch("src.config.datetime") as mock_datetime,
+            patch("os.getenv") as mock_getenv,
+        ):
+            # Keep original datetime for timedelta
+            mock_datetime.datetime.now.return_value = mock_now
+            mock_datetime.timedelta = datetime.timedelta
+            mock_getenv.return_value = "7"  # Mock ADVANCE_DAYS=7
 
             expected_date = datetime.date(2024, 4, 22)  # 7 days later
             assert config.target_date == expected_date
@@ -129,8 +135,13 @@ class TestBookingConfig:
 
         # Mock the current time
         mock_now = datetime.datetime(2024, 4, 15, 10, 0, 0, tzinfo=pacific_tz)
-        with patch("datetime.datetime") as mock_datetime:
-            mock_datetime.now.return_value = mock_now
+        with (
+            patch("src.config.datetime") as mock_datetime,
+            patch("os.getenv") as mock_getenv,
+        ):
+            mock_datetime.datetime.now.return_value = mock_now
+            mock_datetime.timedelta = datetime.timedelta
+            mock_getenv.return_value = "7"  # Mock ADVANCE_DAYS=7
 
             assert config.target_date_str == "2024-04-22"
 
@@ -141,5 +152,5 @@ class TestBookingConfig:
 
         # These should be treated as constants (UPPER_CASE naming)
         assert hasattr(config, "RELEASE_TIME")
-        assert hasattr(config, "ADVANCE_DAYS")
+        assert hasattr(config, "advance_days")  # Now a property, not attribute
         assert hasattr(config, "PRE_ATTEMPT_SECONDS")

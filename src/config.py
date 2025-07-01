@@ -1,6 +1,7 @@
 """Configuration and data classes."""
 
 import datetime
+import os
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -127,8 +128,8 @@ class Selectors:
 class BookingConfig:
     """Store booking configuration with validation."""
 
+    # System timing and behavior (rarely changed)
     RELEASE_TIME: datetime.time = datetime.time(7, 0)
-    ADVANCE_DAYS: int = 7
     PRE_ATTEMPT_SECONDS: int = 10
     MAX_RETRIES: int = 60
     RETRY_DELAY: int = 1
@@ -136,7 +137,8 @@ class BookingConfig:
 
     def __post_init__(self) -> None:
         """Validate configuration values."""
-        if self.ADVANCE_DAYS < 0:
+        advance_days = self.advance_days
+        if advance_days < 0:
             raise ValueError("ADVANCE_DAYS must be non-negative")
         if self.PRE_ATTEMPT_SECONDS < 0:
             raise ValueError("PRE_ATTEMPT_SECONDS must be non-negative")
@@ -146,10 +148,15 @@ class BookingConfig:
             raise ValueError("DEFAULT_WAIT_TIMEOUT must be at least 1")
 
     @property
+    def advance_days(self) -> int:
+        """Get advance booking days from environment."""
+        return int(os.getenv("ADVANCE_DAYS", "7"))
+
+    @property
     def target_date(self) -> datetime.date:
         """Calculate target booking date."""
         return datetime.datetime.now(pacific_tz).date() + datetime.timedelta(
-            days=self.ADVANCE_DAYS
+            days=self.advance_days
         )
 
     @property

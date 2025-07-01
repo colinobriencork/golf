@@ -105,17 +105,28 @@ class DateSelectionPage(BasePage):
 
     def _click_date(self, target_date: datetime.datetime) -> bool:
         """Click specific date."""
-        day_str = f"{target_date.day: 02d}"
+        day_str = f"{target_date.day:02d}"
         spans = self.driver.find_elements(
             By.XPATH,
             f"//span[not(contains(@class, 'text-muted')) and text()='{day_str}']",
         )
 
         if not spans:
+            # Try without zero-padding
+            day_str_no_pad = str(target_date.day)
+            spans = self.driver.find_elements(
+                By.XPATH,
+                f"//span[not(contains(@class, 'text-muted')) and text()='{day_str_no_pad}']",
+            )
+
+        if not spans:
             return False
 
         date_btn = spans[0].find_element(By.XPATH, "..")
-        if date_btn.get_attribute("disabled"):
+        disabled = date_btn.get_attribute("disabled")
+        disabled_class = "disabled" in (date_btn.get_attribute("class") or "")
+
+        if disabled or disabled_class:
             return False
 
         return bool(self.element_manager.click_element_safe(date_btn))
