@@ -1,4 +1,4 @@
-.PHONY: setup install shell run clean
+.PHONY: setup install shell run clean test lint format check all-checks
 
 # Create virtual environment and install dependencies
 install:
@@ -12,9 +12,9 @@ dev:
 shell:
 	pipenv shell
 
-# Run the login script
+# Run the booking script
 run:
-	pipenv run python chronogolf_login.py
+	pipenv run python src/main.py
 
 # Clean up cached files
 clean:
@@ -36,6 +36,52 @@ env:
 	else \
 		echo ".env file already exists."; \
 	fi
+
+# Run tests
+test:
+	pipenv run pytest
+
+# Run tests with coverage
+test-cov:
+	pipenv run pytest --cov=. --cov-report=html --cov-report=term
+
+# Run linter
+lint:
+	pipenv run ruff check src/ tests/
+
+# Format code
+format:
+	pipenv run ruff format src/ tests/
+
+# Type check
+typecheck:
+	pipenv run mypy
+
+# Check code quality (lint + format check + type check)
+check: 
+	pipenv run ruff check src/ tests/
+	pipenv run ruff format --check src/ tests/
+	pipenv run mypy
+
+# Run all quality checks (tests + linting + formatting + type checking)
+all-checks:
+	@echo "🧪 Running all tests (including timezone tests)..."
+	pipenv run pytest
+	@echo "✅ Tests completed"
+	@echo ""
+	@echo "🔍 Checking code formatting..."
+	pipenv run ruff format --check src/ tests/
+	@echo "✅ Code formatting verified"
+	@echo ""
+	@echo "📋 Running linter..."
+	pipenv run ruff check src/ tests/
+	@echo "✅ Linting completed"
+	@echo ""
+	@echo "🔬 Type checking..."
+	pipenv run mypy
+	@echo "✅ Type checking completed"
+	@echo ""
+	@echo "🎉 All checks passed!"
 
 # Complete setup in one command
 init: install env
